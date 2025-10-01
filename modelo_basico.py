@@ -2,10 +2,11 @@ import pandas as pd
 import numpy as np
 import logging
 
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
-    accuracy_score, f1_score, roc_auc_score, confusion_matrix, classification_report
+    roc_auc_score, classification_report, confusion_matrix
 )
 from sklearn.ensemble import RandomForestClassifier
 import xgboost as xgb
@@ -21,101 +22,144 @@ logging.basicConfig(
 )
 
 # ============================
-# Cargar dataset ya unificado
+# Cargar dataset
 # ============================
 df = pd.read_csv("./datasets/completos/v1.csv")
 
-# Separar features y labels
 X = df.drop(columns=["label"])
 y = df["label"]
 
-# ============================
-# Train/test split
-# ============================
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
 # ============================
-# Escalado de features
+# Random Forest con GridSearch
 # ============================
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+rf_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("rf", RandomForestClassifier(random_state=42, class_weight="balanced"))
+])
 
-# ============================
-# Modelo 1: Random Forest
-# ============================
-rf = RandomForestClassifier(
-    n_estimators=300,
-    max_depth=None,
-    class_weight="balanced",
-    random_state=42,
-    n_jobs=-1
+rf_param_grid = {
+    "rf__n_estimators": [200, 300, 500],
+    "rf__max_depth": [None, 10, 20],
+    "rf__min_samples_split": [2, 5, 10],
+    "rf__min_samples_leaf": [1, 2, 4]
+}
+
+rf_grid = GridSearchCV(
+    rf_pipeline,
+    rf_param_grid,
+    scoring="roc_auc",
+    cv=5,
+    n_jobs=-1,
+    verbose=2
 )
 
-rf.fit(X_train_scaled, y_train)
-y_pred_rf = rf.predict(X_test_scaled)
-y_prob_rf = rf.predict_proba(X_test_scaled)[:, 1]
+logging.info("Entrenando Random Forest con GridSearch...")
+rf_grid.fit(X_train, y_train)
 
-logging.info("Resultados Random Forest:")
-print(classification_report(y_test, y_pred_rf))
-print("ROC-AUC:", roc_auc_score(y_test, y_prob_rf))
+y_pred_rf = rf_grid.predict(X_test)
+y_prob_rf = rf_grid.predict_proba(X_test)[:, 1]
 
 # ============================
-# Modelo 2: XGBoost
+# XGBoost con GridSearch
 # ============================
-xgb_model = xgb.XGBClassifier(
-    n_estimators=500,
-    learning_rate=0.05,
-    max_depth=6,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    scale_pos_weight=(len(y_train)-sum(y_train))/sum(y_train),  # balance clases
-    random_state=42,
-    eval_metric="logloss",
-    n_jobs=-1
+xgb_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("xgb", xgb.XGBClassifier(
+        random_state=42,
+        eval_metric="logloss",
+        use_label_encoder=False,
+        n_jobs=-1
+    ))
+])
+
+scale_pos_weight = (len(y_train) - sum(y_train)) / sum(y_train)
+
+xgb_param_grid = {
+    "xgb__n_estimators": [300, 500],
+    "xgb__max_depth": [4, 6, 8],
+    "xgb__learning_rate": [0.01, 0.05, 0.1],
+    "xgb__subsample": [0.8, 1.0],
+    "xgb__colsample_bytree": [0.8, 1.0],
+    "xgb__scale_pos_weight": [scale_pos_weight]
+}
+
+xgb_grid = GridSearchCV(
+    xgb_pipeline,
+    xgb_param_grid,
+    scoring="roc_auc",
+    cv=5,
+    n_jobs=-1,
+    verbose=2
 )
 
-xgb_model.fit(X_train_scaled, y_train)
-y_pred_xgb = xgb_model.predict(X_test_scaled)
-y_prob_xgb = xgb_model.predict_proba(X_test_scaled)[:, 1]
+logging.info("Entrenando XGBoost con GridSearch...")
+xgb_grid.fit(X_train, y_train)
 
-logging.info("Resultados XGBoost:")
-print(classification_report(y_test, y_pred_xgb))
-print("ROC-AUC:", roc_auc_score(y_test, y_prob_xgb))
+y_pred_xgb = xgb_grid.predict(X_test)
+y_prob_xgb = xgb_grid.predict_proba(X_test)[:, 1]
 
 # ============================
-# Matriz de confusión
-# ============================
-fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-
-cm_rf = confusion_matrix(y_test, y_pred_rf)
-cm_xgb = confusion_matrix(y_test, y_pred_xgb)
-
-sns.heatmap(cm_rf, annot=True, fmt="d", cmap="Blues", ax=ax[0])
-ax[0].set_title("Random Forest - Matriz de Confusión")
-ax[0].set_xlabel("Predicho")
-ax[0].set_ylabel("Real")
-
-sns.heatmap(cm_xgb, annot=True, fmt="d", cmap="Greens", ax=ax[1])
-ax[1].set_title("XGBoost - Matriz de Confusión")
-ax[1].set_xlabel("Predicho")
-ax[1].set_ylabel("Real")
-
-plt.tight_layout()
-plt.show()
-
-# ============================
-# Feature Importance
+# Guardar resumen en TXT
 # ============================
 
-# Random Forest
-importances_rf = pd.Series(rf.feature_importances_, index=X.columns).sort_values(ascending=False)
-importances_rf.plot(kind="bar", figsize=(12, 4), title="Random Forest - Feature Importance")
-plt.show()
+RESULTS_FILE = "./resultados/v1.txt"
+with open( RESULTS_FILE , "w") as f:
+    # RF
+    f.write("=== Random Forest ===\n")
+    f.write(f"Mejores parámetros RF: {rf_grid.best_params_}\n")
+    f.write(f"Mejor ROC-AUC CV RF: {rf_grid.best_score_:.4f}\n\n")
+    f.write("Reporte clasificación RF:\n")
+    f.write(classification_report(y_test, y_pred_rf))
+    f.write(f"\nROC-AUC Test RF: {roc_auc_score(y_test, y_prob_rf):.4f}\n")
+    f.write(f"Matriz de confusión RF:\n{confusion_matrix(y_test, y_pred_rf)}\n\n")
 
-# XGBoost
-importances_xgb = pd.Series(xgb_model.feature_importances_, index=X.columns).sort_values(ascending=False)
-importances_xgb.plot(kind="bar", figsize=(12, 4), title="XGBoost - Feature Importance")
-plt.show()
+    # XGB
+    f.write("=== XGBoost ===\n")
+    f.write(f"Mejores parámetros XGB: {xgb_grid.best_params_}\n")
+    f.write(f"Mejor ROC-AUC CV XGB: {xgb_grid.best_score_:.4f}\n\n")
+    f.write("Reporte clasificación XGB:\n")
+    f.write(classification_report(y_test, y_pred_xgb))
+    f.write(f"\nROC-AUC Test XGB: {roc_auc_score(y_test, y_prob_xgb):.4f}\n")
+    f.write(f"Matriz de confusión XGB:\n{confusion_matrix(y_test, y_pred_xgb)}\n")
+
+logging.info("Resumen guardado en 'resultados.txt'.")
+
+# ============================
+# Guardar todos los resultados a CSV
+# ============================
+rf_results = pd.DataFrame(rf_grid.cv_results_)
+rf_results.to_csv("gridsearch_rf_results.csv", index=False)
+
+xgb_results = pd.DataFrame(xgb_grid.cv_results_)
+xgb_results.to_csv("gridsearch_xgb_results.csv", index=False)
+
+logging.info("Resultados completos guardados en CSV (rf y xgb).")
+
+# ============================
+# Análisis visual de hiperparámetros
+# ============================
+def plot_param_performance(results, param_name, title):
+    df = pd.DataFrame(results)
+    df = df.sort_values(by=f"param_{param_name}")
+    plt.figure(figsize=(8, 5))
+    sns.lineplot(
+        x=f"param_{param_name}",
+        y="mean_test_score",
+        data=df,
+        marker="o"
+    )
+    plt.title(f"{title} - efecto de {param_name} en ROC-AUC")
+    plt.ylabel("ROC-AUC CV")
+    plt.xlabel(param_name)
+    plt.tight_layout()
+    plt.show()
+
+# Ejemplos de gráficas:
+plot_param_performance(rf_results, "rf__n_estimators", "Random Forest")
+plot_param_performance(rf_results, "rf__max_depth", "Random Forest")
+plot_param_performance(xgb_results, "xgb__max_depth", "XGBoost")
+plot_param_performance(xgb_results, "xgb__learning_rate", "XGBoost")
