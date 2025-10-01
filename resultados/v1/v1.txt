@@ -1,0 +1,37 @@
+=== Random Forest ===
+Mejores parámetros RF: {'rf__max_depth': None, 'rf__min_samples_leaf': 1, 'rf__min_samples_split': 2, 'rf__n_estimators': 500}
+Mejor ROC-AUC CV RF: 0.9404
+
+Reporte clasificación RF:
+              precision    recall  f1-score   support
+
+           0       0.90      0.94      0.92      3125
+           1       0.82      0.72      0.77      1129
+
+    accuracy                           0.88      4254
+   macro avg       0.86      0.83      0.84      4254
+weighted avg       0.88      0.88      0.88      4254
+
+ROC-AUC Test RF: 0.9357
+Matriz de confusión RF:
+[[2940  185]
+ [ 313  816]]
+
+=== XGBoost ===
+Mejores parámetros XGB: {'xgb__colsample_bytree': 0.8, 'xgb__learning_rate': 0.05, 'xgb__max_depth': 8, 'xgb__n_estimators': 500, 'xgb__scale_pos_weight': 2.7681063122923586, 'xgb__subsample': 0.8}
+Mejor ROC-AUC CV XGB: 0.9440
+
+Reporte clasificación XGB:
+              precision    recall  f1-score   support
+
+           0       0.93      0.91      0.92      3125
+           1       0.76      0.81      0.78      1129
+
+    accuracy                           0.88      4254
+   macro avg       0.84      0.86      0.85      4254
+weighted avg       0.88      0.88      0.88      4254
+
+ROC-AUC Test XGB: 0.9424
+Matriz de confusión XGB:
+[[2829  296]
+ [ 209  920]]
